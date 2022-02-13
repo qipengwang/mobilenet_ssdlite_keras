@@ -1,8 +1,11 @@
-import os
+import os, sys
 import re
 from keras.optimizers import Adam
 from keras import backend as K
+sys.path.append('..')
+sys.path.append('.')
 from models.keras_mobilenet_v2_ssdlite import mobilenet_v2_ssd
+from models.mobilenetv3_ssdlite import mobilenet_v3_ssdlite
 from losses.keras_ssd_loss import SSDLoss
 from utils.object_detection_2d_data_generator import DataGenerator
 from utils.object_detection_2d_geometric_ops import Resize
@@ -14,7 +17,7 @@ from keras.callbacks import TensorBoard, ModelCheckpoint, LearningRateScheduler
 
 # model config
 batch_size = 16
-image_size = (300, 300, 3)
+image_size = (320, 320, 3)
 n_classes = 80
 mode = 'training'
 l2_regularization = 0.0005
@@ -43,11 +46,14 @@ return_predictor_sizes = False
 K.clear_session()
 
 # file paths
-train_images_dir = '/media/shishuai/C4742F9E742F926A/Resources/Datasets/COCO/2017/train2017/'
-train_annotations_filename = '/media/shishuai/C4742F9E742F926A/Resources/Datasets/COCO/2017/annotations/instances_train2017.json'
-val_images_dir = '/media/shishuai/C4742F9E742F926A/Resources/Datasets/COCO/2017/val2017/'
-val_annotations_filename = '/media/shishuai/C4742F9E742F926A/Resources/Datasets/COCO/2017/annotations/instances_val2017.json'
-log_dir = '/media/shishuai/C4742F9E742F926A/Resources/Datasets/ssd_keras_logs/0320/'
+train_images_dir = '/gpfs/share/home/2001213288/MobilenetV3SSDLite-tfkeras/data/coco/images/val2017'
+train_annotations_filename = '/gpfs/share/home/2001213288/MobilenetV3SSDLite-tfkeras/data/coco/annotations/instances_val2017.json'
+# val_images_dir = '/media/shishuai/C4742F9E742F926A/Resources/Datasets/COCO/2017/val2017/'
+# val_annotations_filename = '/media/shishuai/C4742F9E742F926A/Resources/Datasets/COCO/2017/annotations/instances_val2017.json'
+val_images_dir = train_images_dir
+val_annotations_filename = train_annotations_filename
+log_dir = 'logs/0320/'
+os.makedirs(log_dir, exist_ok=True)
 
 
 # learning rate schedule
@@ -90,20 +96,35 @@ def set_trainable(layer_regex, keras_model=None, indent=0, verbose=1):
 
 
 # build model
+# model = mobilenet_v2_ssd(image_size, n_classes, mode, l2_regularization, min_scale, max_scale, scales,
+#                          aspect_ratios_global, aspect_ratios_per_layer, two_boxes_for_ar1, steps,
+#                          offsets, clip_boxes, variances, coords, normalize_coords, subtract_mean,
+#                          divide_by_stddev, swap_channels, confidence_thresh, iou_threshold, top_k,
+#                          nms_max_output_size, return_predictor_sizes)
 model = mobilenet_v2_ssd(image_size, n_classes, mode, l2_regularization, min_scale, max_scale, scales,
                          aspect_ratios_global, aspect_ratios_per_layer, two_boxes_for_ar1, steps,
                          offsets, clip_boxes, variances, coords, normalize_coords, subtract_mean,
                          divide_by_stddev, swap_channels, confidence_thresh, iou_threshold, top_k,
                          nms_max_output_size, return_predictor_sizes)
+                         
+
+# from models.mbv3ssdlite_model import MobileNetV3SSDLite
+# model = MobileNetV3SSDLite(image_size, n_classes, mode, l2_regularization, min_scale, max_scale, scales,
+#                          aspect_ratios_global, aspect_ratios_per_layer, two_boxes_for_ar1, steps,
+#                          offsets, clip_boxes, variances, coords, normalize_coords, subtract_mean,
+#                          divide_by_stddev, swap_channels, confidence_thresh, iou_threshold, top_k,
+#                          nms_max_output_size, return_predictor_sizes,
+#                          'large_extractor', 1, 'MobileNetV3largeSSDLite', 8)
 
 # load weights
-weights_path = '../pretrained_weights/ssdlite_coco_loss-4.8205_val_loss-4.1873.h5'
-model.load_weights(weights_path, by_name=True)
+# weights_path = '../pretrained_weights/ssdlite_coco_loss-4.8205_val_loss-4.1873.h5'
+# model.load_weights(weights_path, by_name=True)
 
 # compile the model
 adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
 ssd_loss = SSDLoss(neg_pos_ratio=3, alpha=1.0)
 # set_trainable(r"(ssd\_[cls|box].*)", model)
+model.build(input_shape=(batch_size, image_size[0], image_size[1], image_size[2]))
 model.compile(optimizer=adam, loss=ssd_loss.compute_loss)
 
 print(model.summary())
@@ -139,6 +160,9 @@ predictor_sizes = [model.get_layer('ssd_cls1conv2_bn').output_shape[1:3],
                    model.get_layer('ssd_cls4conv2_bn').output_shape[1:3],
                    model.get_layer('ssd_cls5conv2_bn').output_shape[1:3],
                    model.get_layer('ssd_cls6conv2_bn').output_shape[1:3]]
+# predictor_sizes = [(20,20),(10,10),(5,5),(3,3),(2,2),(1,1)]
+print(predictor_sizes)
+# exit()
 
 ssd_input_encoder = SSDInputEncoder(img_height=image_size[0],
                                     img_width=image_size[1],
@@ -188,6 +212,11 @@ callbacks = [LearningRateScheduler(schedule=lr_schedule, verbose=1),
                  os.path.join(log_dir, "ssdseg_coco_{epoch:02d}_loss-{loss:.4f}_val_loss-{val_loss:.4f}.h5"),
                  monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True)]
 
+for data in train_generator:
+    # pred = model(data[0])
+    print(data[0].shape, data[1].shape)
+    break
+# model.compile(adam, loss=ssd_loss.compute_loss)
 model.fit_generator(train_generator, epochs=1000, steps_per_epoch=1000,
                     callbacks=callbacks, validation_data=val_generator,
                     validation_steps=100, initial_epoch=0)
